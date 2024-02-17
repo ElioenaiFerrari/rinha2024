@@ -1,2 +1,2 @@
-GET http://localhost:9999/clientes/3/extrato
+GET http://localhost:9999/clientes/2/extrato
 Accept: application/json

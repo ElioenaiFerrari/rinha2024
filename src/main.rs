@@ -31,7 +31,7 @@ pub struct Transaction {
     pub wallet_id: i32,
     pub valor: i32,
     pub tipo: String,
-    pub descricao: Option<String>,
+    pub descricao: String,
     pub realizada_em: Option<chrono::NaiveDateTime>,
 }
 
@@ -39,7 +39,7 @@ pub struct Transaction {
 struct Request {
     pub valor: i32,
     pub tipo: String,
-    pub descricao: Option<String>,
+    pub descricao: String,
 }
 
 struct State {
@@ -61,11 +61,18 @@ struct ErrorView {
 async fn get_transactions(state: Data<State>, path: Path<i32>) -> impl Responder {
     let wallet_id = path.into_inner();
 
-    let wallet = sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
+    let wallet = match sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
         .bind(&wallet_id)
         .fetch_one(&state.pool)
         .await
-        .expect("failed to fetch wallet");
+    {
+        Ok(wallet) => wallet,
+        Err(_) => {
+            return HttpResponse::NotFound().json(ErrorView {
+                message: "wallet not found",
+            });
+        }
+    };
 
     let transactions = sqlx::query_as::<_, Transaction>(
         "SELECT * FROM transactions WHERE wallet_id = $1 ORDER BY realizada_em DESC LIMIT 10",
@@ -93,31 +100,59 @@ async fn create_transaction(
 ) -> impl Responder {
     let wallet_id = path.into_inner();
 
-    if request.tipo.ne("c") && request.tipo.ne("d") {
+    if request.tipo.ne("d") && request.tipo.ne("c") {
         return HttpResponse::BadRequest().json(ErrorView {
             message: "invalid transaction type",
         });
     }
 
-    let wallet = sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
-        .bind(&wallet_id)
-        .fetch_one(&state.pool)
-        .await
-        .expect("failed to fetch wallet");
-
-    let new_balance = wallet.saldo - request.valor;
-    if wallet.limite.lt(&new_balance.abs()) {
+    if request.descricao.len() > 10 || request.descricao.is_empty() {
         return HttpResponse::BadRequest().json(ErrorView {
-            message: "insufficient funds",
+            message: "description too long",
         });
     }
 
-    sqlx::query("UPDATE wallets SET saldo = $1 WHERE id = $2")
-        .bind(&new_balance)
-        .bind(&wallet.id)
-        .execute(&state.pool)
+    if request.valor < 1 {
+        return HttpResponse::BadRequest().json(ErrorView {
+            message: "invalid value",
+        });
+    }
+
+    let wallet = match sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
+        .bind(&wallet_id)
+        .fetch_one(&state.pool)
         .await
-        .expect("failed to update wallet");
+    {
+        Ok(wallet) => wallet,
+        Err(_) => {
+            return HttpResponse::NotFound().json(ErrorView {
+                message: "wallet not found",
+            });
+        }
+    };
+
+    let new_balance = wallet.saldo - request.valor;
+    if request.tipo.eq("d") {
+        if wallet.limite.lt(&new_balance.abs()) {
+            return HttpResponse::UnprocessableEntity().json(ErrorView {
+                message: "insufficient funds",
+            });
+        }
+
+        sqlx::query("UPDATE wallets SET saldo = $1 WHERE id = $2")
+            .bind(&new_balance)
+            .bind(&wallet.id)
+            .execute(&state.pool)
+            .await
+            .expect("failed to update wallet");
+    } else {
+        sqlx::query("UPDATE wallets SET saldo = $1 WHERE id = $2")
+            .bind(&new_balance)
+            .bind(&wallet.id)
+            .execute(&state.pool)
+            .await
+            .expect("failed to update wallet");
+    }
 
     sqlx::query("INSERT INTO transactions (wallet_id, valor, tipo, descricao) VALUES ($1, $2, $3, $4) RETURNING *")
         .bind(&wallet.id)

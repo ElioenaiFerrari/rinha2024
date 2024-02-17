@@ -1,8 +1,8 @@
-POST http://localhost:9999/clientes/1/transacoes
+POST http://localhost:9999/clientes/2/transacoes
 Content-Type: application/json
 
 {
-  "valor": 1000,
-  "tipo": "c",
-  "descricao": "Depósito em dinheiro"
+  "valor": 10000,
+  "tipo": "d",
+  "descricao": "Depósito"
 }
