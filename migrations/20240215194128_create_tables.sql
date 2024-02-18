@@ -1,7 +1,8 @@
 CREATE TABLE wallets (
   id SERIAL PRIMARY KEY,
   saldo INT DEFAULT 0,
-  limite INT DEFAULT 0
+  limite INT DEFAULT 0,
+  limite_usado INT DEFAULT 0
 );
 
 CREATE TABLE transactions (

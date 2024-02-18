@@ -13,6 +13,8 @@ struct Wallet {
     #[serde(skip)]
     pub id: i32,
     pub limite: i32,
+    #[serde(skip)]
+    pub limite_usado: i32,
     pub saldo: i32,
 }
 
@@ -118,7 +120,7 @@ async fn create_transaction(
         });
     }
 
-    let wallet = match sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
+    let mut wallet = match sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE id = $1")
         .bind(&wallet_id)
         .fetch_one(&state.pool)
         .await
@@ -131,8 +133,8 @@ async fn create_transaction(
         }
     };
 
-    let new_balance = wallet.saldo - request.valor;
     if request.tipo.eq("d") {
+        let new_balance = wallet.saldo - request.valor;
         if wallet.limite.lt(&new_balance.abs()) {
             return HttpResponse::UnprocessableEntity().json(ErrorView {
                 message: "insufficient funds",
@@ -145,9 +147,18 @@ async fn create_transaction(
             .execute(&state.pool)
             .await
             .expect("failed to update wallet");
+
+        wallet.saldo = new_balance;
     } else {
-        sqlx::query("UPDATE wallets SET saldo = $1 WHERE id = $2")
-            .bind(&new_balance)
+        let new_used_limit = wallet.limite_usado + request.valor;
+        if wallet.limite.lt(&new_used_limit) {
+            return HttpResponse::UnprocessableEntity().json(ErrorView {
+                message: "insufficient limit",
+            });
+        }
+
+        sqlx::query("UPDATE wallets SET limite_usado = $1 WHERE id = $2")
+            .bind(&new_used_limit)
             .bind(&wallet.id)
             .execute(&state.pool)
             .await
